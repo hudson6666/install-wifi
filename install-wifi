@@ -1,0 +1,336 @@
+#!/bin/bash
+set -e
+
+# install-wifi - v5 - by MrEngman.
+
+display_help() {
+	echo "#"
+	echo "# usage:"
+	echo "#"
+	echo "# install-wifi [[-h | --help] |"
+	echo "#		[-c | --check [driver] [rpi-update | commit_id]] |"
+	echo "#		[-u | --update [driver] [rpi-update | commit_id]] |"
+	echo "#		[driver [rpi-update | commit_id]]]"
+	echo "#"
+	echo "# options:"
+	echo "#  none - install the driver for the wifi module connected to the Pi for the currently running kernel."
+	echo "#"
+	echo "# -h|--help  - display usage."
+	echo "#"
+	echo "# -c|--check [driver] [option]  - check if a driver is available, does not install it."
+	echo "#			 driver - specific driver to check for, one of: 8188eu, 8192eu, 8812au, mt7601, mt7610 or mt7612"
+	echo "#	[option]:-	  blank - check driver for currently running kernel"
+	echo "#		     rpi-update - check driver for latest version of rpi-update"
+	echo "#		      commit-id - check driver for specific commit-id of rpi-update"
+	echo "#"
+	echo "# -u|--update [driver] [option] - update/install driver, can be used after running, but before rebooting, rpi-update"
+	echo "#                                 to update the driver to the one needed for the new kernel installed by rpi-update."
+	echo "#			 driver - specific driver to update/install, one of: 8188eu, 8192eu, 8812au, mt7601, mt7610 or mt7612"
+	echo "#	[option]:- 	  blank - update/install driver for currently running kernel"
+	echo "#		     rpi-update - update/install driver for latest version of rpi-update"
+	echo "#		      commit-id - update/install driver for specific commit-id of rpi-update"
+	echo "#"
+	echo "# driver [option] - install specific driver, enables installing the driver for a module not currently connected to"
+	echo "#		    the Pi, or installing a driver for a different module if you want to change your wifi module."
+	echo "#			 driver - specific driver to install, one of: 8188eu, 8192eu, 8812au, mt7601, mt7610 or mt7612"
+	echo "#	[option]:- 	  blank - update/install driver for currently running kernel"
+	echo "#		     rpi-update - update/install driver for latest version of rpi-update"
+	echo "#		      commit-id - update/install driver for specific commit-id of rpi-update"
+	echo "#"
+	read -n1 -r -p "Press any key to continue..."
+	echo
+	echo "#"
+	echo "# install-wifi examples:"
+	echo "#"
+	echo "#   Install/update the wifi driver for the wifi module connected to the Pi for the currently running kernel"
+	echo "#"
+	echo "#	install-wifi"
+	echo "#"
+	echo "#   If you want to change your wifi module to one using a different driver that is compatible with this script"
+	echo "#   you can install the driver for the new wifi module, one of: 8188eu, 8192eu, 8812au, mt7601, mt7610 or mt7612"
+	echo "#   In this example it will install the 8192eu wifi module driver. After installing the driver shutdown the"
+	echo "#   Pi, remove the currently connected wifi module and connect the new 8192eu wifi module and restart your Pi"
+	echo "#   and it should start up with the new wifi adapter connected to your network."
+	echo "#"
+	echo "#	install-wifi 8192eu - this will install the 8192eu module for the current kernel"
+	echo "#"
+	echo "#   if you want to run rpi-update, first check a driver is available before you update your code. If the check"
+	echo "#   indicates a driver is available run rpi-update to update the firmware/kernel and then before rebooting"
+	echo "#   update the wifi driver."
+	echo "#"
+	echo "#	install-wifi -c rpi-update - check for driver if rpi-update is run."
+	echo "#	sudo rpi-update            - if a driver is available you can run rpi-update to update firmware."
+	echo "#	install-wifi -u rpi-update - then update the driver for the new kernel installed by rpi-update."
+	echo "#	sudo reboot		   - now reboot to update the kernel with the new wifi driver."
+	echo "#"
+	echo "#   if you want to run, say rpi-update b2f6c103e5 to install 3.18.7+ #755, first check a driver is available"
+	echo "#   before you update your code. Then, if a driver is available update the code, and then before rebooting"
+	echo "#   update the wifi driver."
+	echo "#"
+	echo "#	install-wifi -c b2f6c103e5 - check for driver if rpi-update b2f6c103e5 is run to install kernel 3.18.7+ #755."
+	echo "#	sudo rpi-update b2f6c103e5 - if a driver is available you can run rpi-update b2f6c103e5 to update firmware."
+	echo "#	install-wifi -u b2f6c103e5 - then update the driver for the new kernel installed by rpi-update b2f6c103e5."
+	echo "#	sudo reboot		   - now reboot to update the kernel with the new wifi driver."
+	echo "#"
+	echo "#   and finally, you can change the wifi module you are using and install the new driver for it as well as"
+	echo "#   running rpi-update to update the kernel, and assuming in this example the new adapter uses the 8812au"
+	echo "#   driver, using something like:"
+	echo "#"
+	echo "#	install-wifi -c 8812au rpi-update - check for 8812au driver if rpi-update is run."
+	echo "#	sudo rpi-update			  - if a driver is available you can run rpi-update to update firmware."
+	echo "#	install-wifi -u 8812au rpi-update - install the 8812au driver for the new kernel installed by rpi-update."
+	echo "#	sudo halt			  - shutdown the Pi, replace the wifi adapter with the 8812au wifi adapter."
+	echo "#					  - restart the Pi with the new kernel and new 8812au wifi module."
+	echo "#"
+}
+
+fetch_driver() {
+	echo "Checking for a wifi module to determine the driver to install."
+	echo
+	echo -n "Your wifi module is "
+	lsusb > .lsusb
+	# check for rtl8188eu compatible driver
+	if   cat .lsusb | grep -i '056E:4008\|2001:3311\|0DF6:0076\|2001:3310\|2001:330F\|07B8:8179\|0BDA:0179\|0BDA:8179' ; then
+		driver=8188eu
+	# check for rtl8812au compatible driver
+	elif cat .lsusb | grep -i "0BDA:8812\|0BDA:881A\|0BDA:881B\|0BDA:881C\|050D:1106\|050D:1109\|2001:330E\|7392:A822\| /
+				 \|0DF6:0074\|04BB:0952\|0789:016E\|0409:0408\|0B05:17D2\|0E66:0022\|0586:3426\|2001:3313\| /
+				 \|1058:0632\|1740:0100\|2019:AB30\|07B8:8812\|2001:3315\|2001:3316\|2357:0101\|20f4:805b\| /
+				 \|13B1:003F\|148F:9097\|2357:0103\|0BDA:0811\|0BDA:0821\|0BDA:8822\|0BDA:0820\|0BDA:0823\| /
+				 \|7392:A811\|04BB:0953\|0BDA:A811\|7392:A812\|7392:A813\|2001:3314\|0846:9052\|2001:3318\| /
+				 \|0E66:0023\|0411:0242\|2019:AB32" ; then
+		driver=8812au
+	# check for rtl8192eu compatible driver
+	elif cat .lsusb | grep -i '2001:3319\|0BDA:818C\|0BDA:818B\|2357:0107\|2357:0108\|2357:0109' ; then
+		driver=8192eu
+	# check for mt7601Usta compatible driver
+	elif cat .lsusb | grep -i '148F:7650\|0B05:17D3\|0E8D:760A\|0E8D:760B\|13D3:3431\|13D3:3434\|148F:6370\|148F:7601\| /
+				 \|148F:760A\|148F:760B\|148F:760C\|148F:760D\|2001:3D04\|2717:4106\|2955:0001\|2955:1001\| /
+				 \|2955:1003\|2A5F:1000\|7392:7710' ; then
+		driver=mt7601
+	# check for mt7610u compatible driver
+        elif cat .lsusb | grep -i '148F:7610\|0E8D:7610\|0E8D:7650\|0E8D:7630\|13B1:003E\|7392:A711\|7392:B711\|148F:761A\| /
+                                 \|148F:760A\|0B05:17D1\|0B05:17DB\|0DF6:0075\|2001:3D02\|0586:3425\|07B8:7610\|04BB:0951\| /
+                                 \|057C:8502\|293C:5702\|2019:AB31\|20F4:806B' ; then
+		driver=mt7610
+	# check for mt7612u compatible driver
+	elif cat .lsusb | grep -i '0E8D:7662\|0E8D:7632\|0B05:17C9\|0B05:180B\|0E8D:7612\|0846:9053' ; then
+		driver=mt7612
+	fi
+
+	if [[ ! $driver ]] ; then
+		echo "unrecognised."
+		echo
+		echo "**** Unable to identify your wifi module ****"
+		echo
+		echo "The script only works for wifi modules using the rtl8188eu, rtl8192eu, rtl8812au, mt7601, mt7610 and mt7612 drivers."
+		echo
+		echo "Looking for your wifi module the script detected the following USB devices:-"
+		echo
+		cat .lsusb
+		echo
+		echo "If you are certain your module uses one of the drivers the script installs check the output of command"
+		echo "'lsusb' shows your wifi module. If lsusb shows your wifi module try running the script again. If the"
+		echo "script fails to detect your wifi module again the driver may need updating to add your module USB id."
+		echo
+		echo "If lsusb does not show your wifi module you will need to resolve that issue before the script can be"
+		echo "used to install the driver you need."
+		echo
+		exit 1
+	else
+		echo
+		echo "And it uses the $driver driver."
+		echo
+	fi
+}
+
+check_driver() {
+
+	if [[ $kernelcommit == "rpi-update" ]] ; then
+		rpi_firmware_commit_id=master
+	elif [[ $kernelcommit ]] ; then
+		rpi_firmware_commit_id=$kernelcommit
+	fi
+
+	if [[ $kernelcommit ]] ; then
+		# check if Pi2 B or earlier version of Pi and select the relevant kernel image
+		if (grep -Fq BCM2709 /proc/cpuinfo) ; then
+			pi=2
+			image=kernel7.img
+		elif (grep -Fq BCM2708 /proc/cpuinfo) ; then
+			pi=1
+			image=kernel.img
+		else
+			echo "Processor type unknown - you do not appear to be running this script on a Raspberry Pi. Exiting the script"
+			exit 1
+		fi
+
+		echo -n "Please wait ... checking the kernel revision and build you will have after running command 'sudo rpi-update"
+		if [[ $kernelcommit != "rpi-update" ]] ; then
+			echo " $kernelcommit'."
+		else
+			echo "'."
+		fi
+
+# download the relevant kernel image
+		if ! (wget -q https://github.com/Hexxeh/rpi-firmware/raw/$rpi_firmware_commit_id/$image -O .kernel) ; then
+			echo "Invalid commit-id, kernel not available for your version of the Pi, Pi $pi."
+			exit 1
+		fi
+
+# extract uname_string from kernel image
+		strings -n 10 .kernel | grep "Linux version" > .uname_string
+
+		kernel=$(cat .uname_string | awk '{print $3}' | tr -d '+')
+		build=$(grep -Po '(?<=#)[^[]*' .uname_string | awk '{print $1}')
+
+		echo
+		if [[ $kernelcommit == "rpi-update" ]] ; then
+			echo -n "Running command 'sudo rpi-update"
+		elif [[ $kernelcommit ]] ; then
+			echo -n "Running command 'sudo rpi-update $kernelcommit"
+		fi
+		echo "' will load:"
+		echo
+		echo "        kernel revision = $kernel+"
+		echo "        kernel build    = #$build"
+		echo
+	fi
+
+	echo -n "Checking for a new $driver wifi driver module"
+	if [[ $kernelcommit ]] ; then
+		if [[ $kernelcommit == "rpi-update" ]] ; then
+			echo " if you run command 'sudo rpi-update'."
+		else
+			echo " if you run command 'sudo rpi-update $rpi_firmware_commit_id'."
+		fi
+	else
+		echo " for your current kernel."
+	fi
+
+	if (wget --spider -o .wgetlog https://dl.dropboxusercontent.com/u/80256631/$driver\-$kernel\-$build.tar.gz) ; then
+		echo "There is a driver module available for this kernel revision."
+	else
+		if cat .wgetlog | grep -iq "404 Not Found" ; then
+			echo "A driver does not yet exist for this update."
+		else
+			echo "The script cannot access Dropbox to check a driver is available."
+		fi
+	exit 2
+	fi
+}
+
+install_driver() {
+
+	echo "Downloading the $driver driver."
+
+	if (wget -q https://dl.dropboxusercontent.com/u/80256631/$driver\-$kernel\-$build.tar.gz -O wifi-driver.tar.gz) ; then
+		echo "Installing the $driver driver."
+		echo
+		tar xzf wifi-driver.tar.gz
+		if [[ $driver == mt7601 ]] ; then
+			driver=mt7601Usta
+			sudo mkdir -p /etc/Wireless/RT2870STA/
+			sudo cp RT2870STA.dat /etc/Wireless/RT2870STA/
+			sudo cp 95-ralink.rules /etc/udev/rules.d/
+		elif [[ $driver == mt7610 ]] ; then
+			driver=mt7610u_sta
+			sudo mkdir -p /etc/Wireless/RT2870STA/
+			sudo cp RT2870STA.dat /etc/Wireless/RT2870STA/
+			sudo cp 95-ralink.rules /etc/udev/rules.d/
+		elif [[ $driver == mt7612 ]] ; then
+			driver=mt7662u_sta
+			sudo mkdir -p /etc/Wireless/RT2870STA/
+			sudo cp RT2870STA.dat /etc/Wireless/RT2870STA/
+			sudo cp 95-ralink.rules /etc/udev/rules.d/
+		else
+			sudo cp $driver.conf /etc/modprobe.d/.
+		fi
+		sudo install -p -m 644 $driver.ko /lib/modules/$kernel+/kernel/drivers/net/wireless
+		sudo depmod $kernel+
+		if (lsmod | grep $driver > /dev/null) ; then
+			echo "A version of the driver $driver.ko is already loaded and running. You will need to reboot to load the new driver."
+			exit
+		else
+			sudo modprobe $driver
+		fi
+	else
+		echo
+		echo "A driver does not yet exist for this kernel."
+	fi
+}
+
+display_current() {
+	echo
+	echo "Your current kernel revision = $kernel+"
+	echo "Your current kernel build    = #$build"
+	echo
+}
+
+tmpdir=$(mktemp -d)
+trap "\rm -rf $tmpdir" EXIT
+cd $tmpdir
+
+#initialise some variables
+command=$0
+option=$1
+kernelcommit=$2
+
+driver=""
+kernel=$(uname -r | tr -d '+')
+build=${build:-$(uname -v | awk '{print $1}' | tr -d '#')}
+
+
+case "$1" in
+	8188eu|8192eu|8812au|mt7601|mt7610|mt7612)
+		driver=$1
+		display_current
+		check_driver
+		install_driver
+		;;
+	-c|--check)
+		case "$2" in
+			8188eu|8192eu|8812au|mt7601|mt7610|mt7612)
+				driver=$2
+				kernelcommit=$3
+				;;
+		esac
+		display_current
+		if [ ! $driver ] ; then
+			fetch_driver
+		fi
+		check_driver
+		;;
+	-u|--update)
+		case "$2" in
+			8188eu|8192eu|8812au|mt7601|mt7610|mt7612)
+				driver=$2
+				kernelcommit=$3
+				;;
+		esac
+		display_current
+		if [ ! $driver ] ; then
+			fetch_driver
+		fi
+		check_driver
+		install_driver
+		;;
+	-h|--help)
+		display_help
+		exit 0
+		;;
+	"")
+		display_current
+		fetch_driver
+		check_driver
+		install_driver
+		;; # proceed to install
+	*)
+		echo "unknown command: $1" >&2
+		~/$command --help
+		exit 1
+		;;
+esac
+
+exit 0
+
